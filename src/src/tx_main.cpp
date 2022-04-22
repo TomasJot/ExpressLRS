@@ -170,7 +170,11 @@ void EXTI2_TSC_IRQHandler()
 
 bool ICACHE_RAM_ATTR IsArmed()
 {
+ #if defined(USE_8_FULL_CHANNELS) || defined(SE_16_FULL_CHANNELS)
+   return 1;
+ #else 
    return CRSF_to_BIT(crsf.ChannelDataIn[AUX1]);
+ #endif
 }
 
 //////////// DYNAMIC TX OUTPUT POWER ////////////
@@ -678,10 +682,14 @@ static void CheckReadyToSend()
   if (RxWiFiReadyToSend)
   {
     RxWiFiReadyToSend = false;
-    if (!IsArmed())
+    #if defined(USE_8_FULL_CHANNELS) || defined(SE_16_FULL_CHANNELS)
+      SendRxWiFiOverMSP();
+    #else 
+   if(!IsArmed())
     {
       SendRxWiFiOverMSP();
     }
+    #endif
   }
 }
 

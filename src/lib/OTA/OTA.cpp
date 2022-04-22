@@ -153,7 +153,67 @@ void ICACHE_RAM_ATTR GenerateChannelDataHybridWide(volatile uint8_t* Buffer, CRS
         value;
 }
 
-#endif
+/**
+ * 16 Channels mode packet encoding for sending over the air
+ *
+ * Each frame contains 4 channels with 11 bits resolution so it is 44 bits
+ * It remains 4 bits which become:
+ *   2 bits to identifies the set of channels in the frame  (0b00 = channels 1/4, 0b01= 5/8, ... 0b11 = 12/16
+ *   1 bit for the telemetry status 
+ * 
+ * Inputs: crsf.ChannelDataIn , TelemetryStatus
+ *     nonce and tlmDenom are still part of the parameters in this draft version but could be remove later on.
+ * Outputs: Radio.TXdataBuffer
+ **/
+void ICACHE_RAM_ATTR GenerateChannelDataFull16(volatile uint8_t* Buffer, CRSF *crsf, bool TelemetryStatus, uint8_t nonce, uint8_t tlmDenom)
+{
+    static uint8_t Full16ChannelsIdx = 0 ;
+    uint8_t Idx = Full16ChannelsIdx << 2;
+    Buffer[0] = RC_DATA_PACKET & 0b11;
+    Buffer[1] = (crsf->ChannelDataIn[Idx] >> 3);
+    Buffer[2] = (((crsf->ChannelDataIn[Idx] & 0b00000111) << 5) | (crsf->ChannelDataIn[Idx + 1] >> 6) );
+    Buffer[3] = (((crsf->ChannelDataIn[Idx + 1] & 0b00111111 ) << 2) | (crsf->ChannelDataIn[Idx + 2] >> 9) );
+    Buffer[4] = (crsf->ChannelDataIn[Idx + 2] >> 1 );
+    Buffer[5] = (((crsf->ChannelDataIn[Idx + 2] & 0b00000001 ) << 7) | (crsf->ChannelDataIn[Idx + 3] >> 4) );
+    Buffer[6] = (((crsf->ChannelDataIn[Idx + 3] & 0b00001111 ) << 4) ) ; // first main bits contains remaining part of the last channel
+    Buffer[6] = Buffer[6] | ((Full16ChannelsIdx & 0b11) << 1) ; // add 2 bits to identify the groups of channels in each frame
+    Buffer[6] = Buffer[6] | (TelemetryStatus & 0b1) ; // add 1 bits for telemetry acknowlegment 
+
+    Full16ChannelsIdx = (Full16ChannelsIdx + 1) & 0b11 ; // keep index in range 0...3 (because there are 4 groups)
+}
+
+/**
+ * 8 Channels mode packet encoding for sending over the air
+ * We send 2 frames with 4 bytes (+ header and CRC)
+ * Each frame contains 4 channels with 11 bits resolution so it is 44 bits (channel 1/4 or channels 5/8)
+ * It remains 4 bits in  the packet which becomes:
+ *   1 bits to identifies the set of channels in the frame  (0b0 = channels 1/4 + 10, 0b1= 6/9 + 11)
+ *   1 bit for the telemetry status 
+ * 
+ * Inputs: crsf.ChannelDataIn , TelemetryStatus
+ *     nonce and tlmDenom are still part of the parameters in this draft version but could be remove later on.
+ * Outputs: Radio.TXdataBuffer
+ **/
+static uint8_t Full8ChannelsIdx = 0 ;
+
+void ICACHE_RAM_ATTR GenerateChannelDataFull8(volatile uint8_t* Buffer, CRSF *crsf, bool TelemetryStatus, uint8_t nonce, uint8_t tlmDenom)
+{
+    uint8_t Idx = ( Full8ChannelsIdx ) ? 4 : 0 ; // index = channel -1
+    Buffer[0] = RC_DATA_PACKET & 0b11;
+    Buffer[1] = (crsf->ChannelDataIn[Idx] >> 3);
+    Buffer[2] = (((crsf->ChannelDataIn[Idx] & 0b00000111) << 5) | (crsf->ChannelDataIn[Idx + 1] >> 6) );
+    Buffer[3] = (((crsf->ChannelDataIn[Idx + 1] & 0b00111111 ) << 2) | (crsf->ChannelDataIn[Idx + 2] >> 9) );
+    Buffer[4] = (crsf->ChannelDataIn[Idx + 2] >> 1 );
+    Buffer[5] = (((crsf->ChannelDataIn[Idx + 2] & 0b00000001 ) << 7) | (crsf->ChannelDataIn[Idx + 3] >> 4) );
+    Buffer[6] = (((crsf->ChannelDataIn[Idx + 3] & 0b00001111 ) << 4) ) ; // first main bits contains remaining part of the last channel
+    Buffer[6] = Buffer[6] | ((Full8ChannelsIdx & 0b1) << 1) ; // add 1 bits to identify the groups of channels in each frame
+    Buffer[6] = Buffer[6] | (TelemetryStatus & 0b1) ; // add 1 bits for telemetry acknowlegment 
+
+    Full8ChannelsIdx = (Full8ChannelsIdx + 1) & 0b1 ; // keep index in range 0, 1 (because there are only 2 groups)
+}
+
+
+#endif // end of TARGET_TX or defined UNIT_TEST
 
 #if TARGET_RX or defined UNIT_TEST
 
@@ -296,7 +356,100 @@ bool ICACHE_RAM_ATTR UnpackChannelDataHybridWide(volatile uint8_t* Buffer, CRSF 
 
     return TelemetryStatus;
 }
-#endif
+/**
+ * Unpacking 16 Channels 
+ *
+ * Each frame OTA contains only 4 channels with 11 bits resolution so it is 44 bits
+ * 3 remaining bits are :
+ *   2 bits to identifie the set of channels in the frame  (0b00 = channels 1/4, 0b01= 5/8, ... 0b11 = 12/16)
+ *   1 bit for the telemetry status 
+ * 
+ * Inputs: crsf.ChannelDataIn , TelemetryStatus
+ *     nonce and tlmDenom are still part of the parameters in this draft version but could be remove later on.
+ * Outputs: Radio.TXdataBuffer ; the function returns the telemetry bit 
+ **/
+bool ICACHE_RAM_ATTR UnpackChannelDataFull16(volatile uint8_t* Buffer, CRSF *crsf, uint8_t nonce, uint8_t tlmDenom)
+{
+    static bool TelemetryStatus = Buffer[6] & 0b1; // last bit is always the telemetry acknowledgment 
+    const uint8_t ChannelGroup = (Buffer[6] & 0b00000110 ) >> 1; // 2 bits identify the group of channels
+
+    const uint16_t Channel1of4 = ( ((uint16_t) Buffer[1]) << 3) | ((Buffer[2] & 0b11100000) >> 5);
+    const uint16_t Channel2of4 = ((((uint16_t) Buffer[2]) & 0b00011111 ) << 6) | ((Buffer[3] & 0b11111100) >> 2);
+    const uint16_t Channel3of4 = ((((uint16_t) Buffer[3]) & 0b00000011 ) << 9) | (((uint16_t) Buffer[4]) << 1) | ((Buffer[5] & 0b10000000) >> 7);
+    const uint16_t Channel4of4 = ((((uint16_t) Buffer[5]) & 0b01111111 ) << 4) | ((Buffer[6] & 0b11110000) >> 4) ;
+
+    switch (ChannelGroup) {
+        case 0:
+            crsf->PackedRCdataOut.ch0 = Channel1of4 ;
+            crsf->PackedRCdataOut.ch1 = Channel2of4 ;
+            crsf->PackedRCdataOut.ch2 = Channel3of4 ;
+            crsf->PackedRCdataOut.ch3 = Channel4of4 ;
+            break ;
+        case 1:
+            crsf->PackedRCdataOut.ch4 = Channel1of4 ;
+            crsf->PackedRCdataOut.ch5 = Channel2of4 ;
+            crsf->PackedRCdataOut.ch6 = Channel3of4 ;
+            crsf->PackedRCdataOut.ch7 = Channel4of4 ;
+            break ;
+        case 2:
+            crsf->PackedRCdataOut.ch8 = Channel1of4 ;
+            crsf->PackedRCdataOut.ch9 = Channel2of4 ;
+            crsf->PackedRCdataOut.ch10 = Channel3of4 ;
+            crsf->PackedRCdataOut.ch11 = Channel4of4 ;
+            break ;
+        case 3:
+            crsf->PackedRCdataOut.ch12 = Channel1of4 ;
+            crsf->PackedRCdataOut.ch13 = Channel2of4 ;
+            crsf->PackedRCdataOut.ch14 = Channel3of4 ;
+            crsf->PackedRCdataOut.ch15 = Channel4of4 ;
+            break ;
+    }    
+     return TelemetryStatus;
+}
+
+/**
+ * Unpacking 8 Channels 
+ *
+ * Each frame OTA contains only 4 channels with 11 bits resolution so it is 44 bits
+ * 3 remaining bits are :
+ *   1 bit to identifie the set of channels in the frame  (0b0 = channels 1/4, 0b01= 5/8)
+ *   1 bit for the telemetry status 
+ * 
+ * 
+ * Inputs: crsf.ChannelDataIn , TelemetryStatus
+ *     nonce and tlmDenom are still part of the parameters in this draft version but could be remove later on.
+ * Outputs: Radio.TXdataBuffer
+ **/
+bool ICACHE_RAM_ATTR UnpackChannelDataFull8(volatile uint8_t* Buffer, CRSF *crsf, uint8_t nonce, uint8_t tlmDenom)
+{
+    static bool TelemetryStatus = Buffer[6] & 0b1; // last bit is always the telemetry acknowledgment 
+    const uint8_t ChannelGroup = (Buffer[6] & 0b00000010 ) >> 1; // 1 bit identifies the group of channels
+    
+    const uint16_t Channel1of4 = ( ((uint16_t) Buffer[1]) << 3) | ((Buffer[2] & 0b11100000) >> 5);
+    const uint16_t Channel2of4 = ((((uint16_t) Buffer[2]) & 0b00011111 ) << 6) | ((Buffer[3] & 0b11111100) >> 2);
+    const uint16_t Channel3of4 = ((((uint16_t) Buffer[3]) & 0b00000011 ) << 9) | (((uint16_t) Buffer[4]) << 1) | ((Buffer[5] & 0b10000000) >> 7);
+    const uint16_t Channel4of4 = ((((uint16_t) Buffer[5]) & 0b01111111 ) << 4) | ((Buffer[6] & 0b11110000) >> 4) ;
+
+    switch (ChannelGroup) {
+       case 0:
+            crsf->PackedRCdataOut.ch0 = Channel1of4 ;
+            crsf->PackedRCdataOut.ch1 = Channel2of4 ;
+            crsf->PackedRCdataOut.ch2 = Channel3of4 ;
+            crsf->PackedRCdataOut.ch3 = Channel4of4 ;
+            break ;
+        case 1:
+            crsf->PackedRCdataOut.ch4 = Channel1of4 ;
+            crsf->PackedRCdataOut.ch5 = Channel2of4 ;
+            crsf->PackedRCdataOut.ch6 = Channel3of4 ;
+            crsf->PackedRCdataOut.ch7 = Channel4of4 ;
+            break ;
+    }    
+    return TelemetryStatus;
+}
+
+
+#endif  // end of TARGET_RX or defined UNIT_TEST
+
 
 OtaSwitchMode_e OtaSwitchModeCurrent;
 void OtaSetSwitchMode(OtaSwitchMode_e switchMode)
@@ -307,18 +460,34 @@ void OtaSetSwitchMode(OtaSwitchMode_e switchMode)
     case smHybrid:
     default:
         #if defined(TARGET_TX) || defined(UNIT_TEST)
+          #if !defined(USE_8_FULL_CHANNELS)
         PackChannelData = &GenerateChannelDataHybrid8;
+          #else
+        PackChannelData = &GenerateChannelDataFull8;
+          #endif
         #endif
         #if defined(TARGET_RX) || defined(UNIT_TEST)
+         #if !defined(USE_8_FULL_CHANNELS)
         UnpackChannelData = &UnpackChannelDataHybridSwitch8;
+         #else
+        UnpackChannelData = &UnpackChannelDataFull8;
+         #endif
         #endif
         break;
     case smHybridWide:
         #if defined(TARGET_TX) || defined(UNIT_TEST)
+          #if !defined(USE_16_FULL_CHANNELS)
         PackChannelData = &GenerateChannelDataHybridWide;
+          #else
+        PackChannelData = &GenerateChannelDataFull16;
+          #endif
         #endif
         #if defined(TARGET_RX) || defined(UNIT_TEST)
+          #if !defined(USE_16_FULL_CHANNELS)
         UnpackChannelData = &UnpackChannelDataHybridWide;
+          #else
+        UnpackChannelData = &UnpackChannelDataFull16;
+          #endif
         #endif
         break;
     }

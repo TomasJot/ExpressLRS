@@ -83,6 +83,12 @@ static Servo *Servos[SERVO_COUNT];
 static bool newChannelsAvailable;
 #endif
 
+#if defined(USE_SBUS_ON_RX)
+static bool newChannelsAvailableToSbus = false;
+uint32_t lastSbusUpdate = 0;
+bool atLeastOneSbusSent = false;  // we do not send Sbus if we where never connected
+#endif
+
 /* CRSF_TX_SERIAL is used by CRSF output */
 #if defined(TARGET_RX_FM30_MINI)
     HardwareSerial CRSF_TX_SERIAL(USART2);
@@ -626,6 +632,10 @@ static void ICACHE_RAM_ATTR ProcessRfPacket_RC()
         #else
         crsf.sendRCFrameToFC();
         #endif
+        #if defined(USE_SBUS_ON_RX)
+        newChannelsAvailableToSbus = true;
+        #endif
+
     }
 }
 
@@ -850,8 +860,11 @@ static void setupSerial()
 #ifdef PLATFORM_STM32
 #if defined(TARGET_R9SLIMPLUS_RX)
     CRSF_RX_SERIAL.setRx(GPIO_PIN_RCSIGNAL_RX);
+    #if (!defined(USE_SBUS_ON_RX))
     CRSF_RX_SERIAL.begin(RCVR_UART_BAUD);
-
+    #else
+    CRSF_RX_SERIAL.begin(100000, SERIAL_8E2 );
+    #endif
     CRSF_TX_SERIAL.setTx(GPIO_PIN_RCSIGNAL_TX);
 #else /* !TARGET_R9SLIMPLUS_RX */
     CRSF_TX_SERIAL.setTx(GPIO_PIN_RCSIGNAL_TX);
@@ -861,7 +874,11 @@ static void setupSerial()
     // USART1 is used for RX (half duplex)
     CRSF_RX_SERIAL.setHalfDuplex();
     CRSF_RX_SERIAL.setTx(GPIO_PIN_RCSIGNAL_RX);
+    #if (!defined(USE_SBUS_ON_RX))
     CRSF_RX_SERIAL.begin(RCVR_UART_BAUD);
+    #else
+    CRSF_RX_SERIAL.begin(100000, SERIAL_8E2 );
+    #endif
     CRSF_RX_SERIAL.enableHalfDuplexRx();
 
     // USART2 is used for TX (half duplex)
@@ -870,17 +887,29 @@ static void setupSerial()
     CRSF_TX_SERIAL.setRx((PinName)NC);
     CRSF_TX_SERIAL.setTx(GPIO_PIN_RCSIGNAL_TX);
 #endif /* TARGET_RX_GHOST_ATTO_V1 */
+    #if (!defined(USE_SBUS_ON_RX))
     CRSF_TX_SERIAL.begin(RCVR_UART_BAUD);
+    #else
+    CRSF_TX_SERIAL.begin(100000, SERIAL_8E2);
+    #endif
 #endif /* PLATFORM_STM32 */
 
 #if defined(TARGET_RX_FM30_MINI)
     Serial.setRx(GPIO_PIN_DEBUG_RX);
     Serial.setTx(GPIO_PIN_DEBUG_TX);
+    #if (!defined(USE_SBUS_ON_RX))
     Serial.begin(RCVR_UART_BAUD); // Same baud as CRSF for simplicity
+    #else
+    Serial.begin(100000, SERIAL_8E2);
+    #endif
 #endif
 
 #if defined(PLATFORM_ESP8266)
+    #if (!defined(USE_SBUS_ON_RX))
     Serial.begin(RCVR_UART_BAUD);
+    #else
+    Serial.begin(100000, SERIAL_8E2);
+    #endif
     #if defined(RCVR_INVERT_TX)
     USC0(UART0) |= BIT(UCTXI);
     #endif
@@ -1105,6 +1134,31 @@ static void servosUpdate(unsigned long now)
 #endif
 }
 
+static void sbusUpdate(unsigned long now)
+{
+#if defined(USE_SBUS_ON_RX)
+    // Sbus has to be sent once every 9msec
+    // A frame is generated with last channels recieved even if connection is lost
+    // this version does not supprt failsafe with predefined values 
+    const uint32_t elapsed = now - lastSbusUpdate;
+    if (elapsed < 9)
+        return;
+
+    if ( (newChannelsAvailableToSbus) ||  ( atLeastOneSbusSent ))
+    {
+        newChannelsAvailableToSbus = false;
+        atLeastOneSbusSent = true ;
+        crsf.sendRCFrameToSbus(false,false); 
+    } 
+    else
+        return; // prevent updating lastUpdate
+
+    // need to sample actual millis at the end to account for any
+    // waiting that happened in sendRCFRameToSbus()
+    lastSbusUpdate = millis();
+#endif
+}
+
 static void updateBindingMode()
 {
     // If the eeprom is indicating that we're not bound
@@ -1249,6 +1303,7 @@ void loop()
 
     cycleRfMode(now);
     servosUpdate(now);
+    sbusUpdate(now);
 
     uint32_t localLastValidPacket = LastValidPacket; // Required to prevent race condition due to LastValidPacket getting updated from ISR
     if ((connectionState == disconnectPending) ||

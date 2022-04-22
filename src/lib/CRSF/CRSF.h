@@ -113,8 +113,10 @@ public:
     void ICACHE_RAM_ATTR sendRCFrameToFC();
     void ICACHE_RAM_ATTR sendMSPFrameToFC(uint8_t* data);
     void sendLinkStatisticsToFC();
+    #if (defined(USE_SBUS_ON_RX))
+    void ICACHE_RAM_ATTR sendRCFrameToSbus(bool isSignalLoss, bool isFailsafe);
     #endif
-
+    #endif // end CRSF_RX_MODULE
 
     /////////////////////////////////////////////////////////////
     static bool CRSFstate;

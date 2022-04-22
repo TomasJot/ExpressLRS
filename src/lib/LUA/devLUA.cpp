@@ -82,7 +82,15 @@ static struct luaItem_string luaCELimit = {
 static struct luaItem_selection luaSwitch = {
     {"Switch Mode", CRSF_TEXT_SELECTION},
     0, // value
-    "Hybrid;Wide",
+    #if defined(USE_8_FULL_CHANNELS) && defined(USE_16_FULL_CHANNELS)
+     "8 channels;16 channels",
+    #elif defined(USE_8_FULL_CHANNELS)
+      "8 channels;Wide",
+    #elif defined(USE_16_FULL_CHANNELS) 
+      "Hybrid;16 channels",
+    #else
+      "Hybrid;Wide",
+    #endif    
     emptySpace
 };
 

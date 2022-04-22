@@ -871,7 +871,9 @@ bool CRSF::RXhandleUARTout()
             uint8_t OutData[OutPktLen];
             SerialOutFIFO.popBytes(OutData, OutPktLen);
             interrupts();
+            #if (!defined(USE_SBUS_ON_RX)) // just discard the packet when CRSF TX UART is used for SBUS
             this->_dev->write(OutData, OutPktLen); // write the packet out
+            #endif 
             return true;
         }
     }
@@ -905,6 +907,7 @@ void ICACHE_RAM_ATTR CRSF::sendLinkStatisticsToFC()
 void ICACHE_RAM_ATTR CRSF::sendRCFrameToFC()
 {
 #if !defined(CRSF_RCVR_NO_SERIAL) && !defined(DEBUG_CRSF_NO_OUTPUT)
+    #if (!defined(USE_SBUS_ON_RX))
     constexpr uint8_t outBuffer[] = {
         // No need for length prefix as we aren't using the FIFO
         CRSF_ADDRESS_FLIGHT_CONTROLLER,
@@ -920,6 +923,7 @@ void ICACHE_RAM_ATTR CRSF::sendRCFrameToFC()
     this->_dev->write(outBuffer, sizeof(outBuffer));
     this->_dev->write((byte *)&PackedRCdataOut, RCframeLength);
     this->_dev->write(crc);
+    #endif
 #endif // CRSF_RCVR_NO_SERIAL
 }
 
@@ -934,6 +938,25 @@ void ICACHE_RAM_ATTR CRSF::sendMSPFrameToFC(uint8_t* data)
     }
 #endif // CRSF_RCVR_NO_SERIAL
 }
+
+#if (defined(USE_SBUS_ON_RX))
+#define SBUS_STATE_FAILSAFE 0x08
+#define SBUS_STATE_SIGNALLOSS 0x04
+void ICACHE_RAM_ATTR CRSF::sendRCFrameToSbus(bool isSignalLoss, bool isFailsafe)
+{
+    uint8_t stateByte = 0x00;
+    if (isSignalLoss) {
+        stateByte |= SBUS_STATE_SIGNALLOSS;
+    }
+    if (isFailsafe) {
+        stateByte |= SBUS_STATE_FAILSAFE;
+    }
+    this->_dev->write( (uint8_t) 0x0F ); // start byte
+    this->_dev->write((byte *)&PackedRCdataOut, RCframeLength); // 16 channels in 11 bits (packed)
+    this->_dev->write( (uint8_t) stateByte ); // 2 more channels are not supported in ELRS
+    this->_dev->write( (uint8_t) 0x00 ); // end byte
+}
+#endif
 
 /**
  * @brief   Get encoded channel position from PackedRCdataOut

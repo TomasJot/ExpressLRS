@@ -150,7 +150,11 @@ static int handle(void)
   }
 #endif
 
+ #if defined(USE_8_FULL_CHANNELS) || defined(SE_16_FULL_CHANNELS)
+  if (true)
+ #else 
   if(!IsArmed())
+ #endif
   {
     int key;
     bool isLongPressed;

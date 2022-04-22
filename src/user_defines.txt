@@ -107,3 +107,17 @@
 
 # These debugging options send extra information to BetaFlight in the LinkStatistics packet
 #-DDEBUG_BF_LINK_STATS
+
+# changes below are done in this fork:
+#
+# Activate one or the 2 define below if you want that ELRS change Hybrid and/or Wide mode 
+# to send 8 or 16 channels in hi11 bits resolution. Activation 8 or 16 channel mode cancels arm switch
+# functons, channel 5 becomms regular full resolution channel.
+-DUSE_8_FULL_CHANNELS
+-DUSE_16_FULL_CHANNELS
+# Activate the option below if you want that ELRS Rx generates SBUS frames instead of CRSF frame on the Tx pin
+# When activate, the baudrate on TX and RX pins is changed to 100000 baud (standard SBUS baud)
+# Please note that the signal is a normal UART signal and not an inverted one like official SBUS.
+# It means that if you want to connect it to a standard SBUS/PWM converter you have to insert an inverter in between
+# in current version, the failsafe bits of SBUS are not managed (failsafe uses only a HOLD mode)
+#-DUSE_SBUS_ON_RX

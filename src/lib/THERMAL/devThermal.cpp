@@ -47,7 +47,11 @@ static void initialize()
 static void timeoutThermal()
 {
 #if defined(HAS_THERMAL)
+  #if defined(USE_8_FULL_CHANNELS) || defined(SE_16_FULL_CHANNELS)
+    if(connectionState != wifiUpdate)
+  #else 
     if(!IsArmed() && connectionState != wifiUpdate)
+  #endif 
     {
         thermal.handle();
  #ifdef HAS_SMART_FAN
