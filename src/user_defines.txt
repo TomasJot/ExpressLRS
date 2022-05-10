@@ -111,7 +111,7 @@
 # changes below are done in this fork:
 #
 # Activate one or the 2 define below if you want that ELRS change Hybrid and/or Wide mode 
-# to send 8 or 16 channels in hi11 bits resolution. Activation 8 or 16 channel mode cancels arm switch
+# to send 8 or 16 channels at 11 bits resolution. Activation 8 or 16 channel mode cancels arm switch
 # functons, channel 5 becomms regular full resolution channel.
 -DUSE_8_FULL_CHANNELS
 -DUSE_16_FULL_CHANNELS
