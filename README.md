@@ -10,7 +10,7 @@
 
 </center>
 
-## This is a fork of official ELRS project based on version 2.4.0
+## This is a fork of official ELRS project based on version 2.x.x
 All SBUS and most of 8/16 channel implemetation  was taken from mstrens fork. Changes where done in order to let ELRS sent 8 (1/2 refresh rate) or 16 (1/4 refresh rate) channels in 11 bit resolution and also to let the RX generate a SBUS frame instead of a CRSF frame. Arm switch is discarded , channel 5 output normal if either 8 or 16 channel mode is defined, default arm fuction - armed, except RX WiFi connectivity. SBUS output can be enabled in user_defines.txt.
 
 ## Support ExpressLRS
